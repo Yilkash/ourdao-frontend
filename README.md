@@ -37,6 +37,7 @@ This repository is one of three that make up OurDAO:
 - [Licence Policy](#licence-policy)
 - [Scripts](#scripts)
 - [Testing](#testing)
+- [Accessibility](#accessibility)
 - [What's real vs. not](#whats-real-vs-not)
 - [Security notes](#security-notes)
 - [Roadmap](#roadmap)
@@ -320,6 +321,36 @@ Lists in OurDAO (loan proposals, governance proposals, treasury withdrawals, not
 ### Polling Gating & Off-Chain Query Policy (#242)
 
 All queries to `ourdao-backend` (loan history, notifications, activity feed, stats) are gated on `isBackendConfigured()`. When no backend is configured or when a connected user is not a DAO member, loan history queries are disabled to prevent unnecessary 15-second polling loops. Member registration and loan submission mutations explicitly invalidate cache keys (`queryKeys.userData`, `queryKeys.userLoans`), ensuring newly joined members or newly created loans reflect instantly in the UI.
+
+## Accessibility
+
+**Target: [WCAG 2.2 Level AA](https://www.w3.org/TR/WCAG22/).** Stating a target
+is not the same as meeting it, so this app does not claim conformance yet. The
+full audit — every Level A and AA criterion marked pass, partial, fail or
+untested, with evidence — is in
+[docs/accessibility-statement.md](docs/accessibility-statement.md), which also
+lists the known gaps rather than only the successes.
+
+Where it stands: **14 of 55** Level A/AA criteria verified, **5 known failures**,
+and **16 with no evidence either way**. The untested ones are the honest part —
+automated checks currently cover five components, not every route.
+
+| Issue | Criterion | Gap |
+| --- | --- | --- |
+| [#353](https://github.com/ourdao/ourdao-frontend/issues/353) | 1.3.4 Orientation | Web manifest locks the app to portrait. |
+| [#321](https://github.com/ourdao/ourdao-frontend/issues/321) | 1.4.4 Resize Text | Viewport disables pinch-zoom. |
+| [#352](https://github.com/ourdao/ourdao-frontend/issues/352) | 2.4.2 Page Titled | One tab title for every route. |
+| [#360](https://github.com/ourdao/ourdao-frontend/issues/360) | 1.3.1, 3.3.2, 4.1.2 | Shared form components with correct label association. |
+| [#375](https://github.com/ourdao/ourdao-frontend/issues/375) | several | Automated checks do not cover the whole app yet. |
+
+Fixing those gaps is tracked on the individual issues, not here. What runs in CI
+today: `eslint-plugin-jsx-a11y` (recommended) with `--max-warnings=0` on every
+source file; `axe-core` against rendered output in `test/a11y.test.tsx`, failing
+on any violation at any impact level with no rule disabled and no baseline to
+update; direct role and name assertions for what `axe` cannot express; and
+`test/contrast.test.ts` for AA contrast in both themes. Component-level triage
+from [#238](https://github.com/ourdao/ourdao-frontend/issues/238) is in
+[docs/a11y-audit.md](docs/a11y-audit.md).
 
 ## What's real vs. not
 

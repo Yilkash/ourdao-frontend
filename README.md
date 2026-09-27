@@ -112,6 +112,105 @@ src/
 
 Data flows through [TanStack Query](https://tanstack.com/query) throughout: `useDAO.ts`'s hooks wrap live Soroban contract reads (the contract itself has no queryable lists, so proposal/loan enumeration counts come from the indexer, then each item is fetched live by id straight from the contract — the count is an off-chain hint, the data is always on-chain-sourced) and Freighter-signed writes; `useNotifications.ts` wraps the backend's polled REST endpoints.
 
+### Data flow
+
+Reads and writes take different routes, and the two routes end at places with
+different authority. The single most important thing to hold onto: **a count
+from the indexer is a hint about what exists, but the record itself is always
+read back from the contract.** The contract has no queryable lists, so the
+frontend asks the indexer how many proposals there are and then fetches each one
+by id straight from the chain.
+
+```
+  ══  authoritative, from the chain          ──  indexed, from ourdao-backend
+      (simulated read-only, never submitted)      (may lag the chain)
+```
+
+#### Read path
+
+```
+  page / component
+        │  useLoanProposals(), useDAOStats(), useLoan(id) …
+        ▼
+  ┌──────────────────────────────────────────────────────────────┐
+  │  src/hooks/dao/  reads.ts · proposal-reads.ts · enumeration.ts  │
+  │  TanStack Query; every key lives in src/lib/query-keys.ts      │
+  └────────────┬─────────────────────────────────┬─────────────────┘
+               │ daoRead.*                       │ backend.*
+               ▼                                 ▼
+  ┌────────────────────────────┐     ┌────────────────────────────┐
+  │  src/lib/dao-client.ts     │     │  src/lib/backend.ts        │
+  │  simulateTransaction       │     │  fetch(BACKEND_URL)        │
+  └────────────┬───────────────┘     └─────────────┬──────────────┘
+               │                                   │
+  ═════════════▼═════════════════      ────────────▼────────────────
+  ██  Soroban RPC                   ░░░  ourdao-backend (indexer)
+  ██  contract state                ░░░  counts, event log, stats,
+  ██  authoritative                 ░░░  user loan lists, admin log
+  ══════════════════════════════      ░░░  a hint, not the record
+```
+
+The hybrid enumeration path, which is the one worth tracing by hand:
+
+```
+  backend.getStats() ──▶ count          ──▶ "there are N proposals"
+  daoRead.getLoanProposal(id) ──▶ ──▶   the actual proposal, per id
+  pagination walks backwards from count - 1, newest id first
+```
+
+A stale count therefore costs a page, never correctness: the count is only used
+to decide which ids to ask for.
+
+#### Write path
+
+Everything here is client-side — see the wallet boundary below.
+
+```
+  page / component
+        │  vote(), stake(), requestLoan() …
+        ▼
+  ┌──────────────────────────────────────────────────────────────┐
+  │  src/hooks/dao/writes.ts — useWriteAction().run()            │
+  │  declares its own invalidates[] and optional optimistic       │
+  │  updates, and rolls the optimistic ones back if the write     │
+  │  fails or is cancelled.                                       │
+  └────────────┬─────────────────────────────────────────────────┘
+               │  daoWrite(address, signXDR)
+               ▼
+  ┌────────────────────────────┐          ┌──────────────────────┐
+  │  src/lib/dao-client.ts     │  sign    │  Freighter extension │
+  │  builds the transaction    │ ───────▶ │  (user approves)     │
+  └────────────┬───────────────┘          └──────────┬───────────┘
+               │  invoke(): sendTransaction, then poll          │
+               │  getTransaction until final                   │
+  ═════════════▼═════════════════      ───────────────────────────
+  ██  Soroban RPC                   ░░░  once confirmed:
+  ██  state is now changed          ░░░  invalidate every key the
+  ██  authoritative                 ░░░  call site declared
+  ══════════════════════════════      ░░░  stale data refetches
+```
+
+#### The wallet boundary
+
+`src/lib/wallet.tsx` is `'use client'`, and so is every hook that imports it
+(`writes.ts`, and the wallet-scoped reads). That is the line deciding what can be
+server-rendered:
+
+- **Server-renderable:** anything that only reaches `dao-client.ts` or
+  `backend.ts` — public stats, thresholds, loan policy, proposal counts and
+  proposal bodies.
+- **Client-only:** anything that calls `useWallet()` — connect state, signing,
+  and every member action.
+
+Wallet-scoped cache keys are the ones carrying an address: `userData`,
+`userLoans`, `hasVoted`, `stake`, `document`, `notifications` — collected as
+`allWalletScopedQueryKeys()` in `src/lib/query-keys.ts`. Most also have a
+`…Disabled` variant keyed on `null` (`document` is the exception), so a
+disconnected visitor gets a disabled query instead of a cached answer left over
+from the last wallet that was connected. Connecting, disconnecting and switching
+accounts all invalidate exactly that list, which is why it is exported as one
+group rather than repeated at each call site.
+
 ## Where the Stellar integration lives
 
 | File | Role |

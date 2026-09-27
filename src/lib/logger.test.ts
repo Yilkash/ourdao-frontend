@@ -40,16 +40,14 @@ afterEach(() => {
 
 describe('level control', () => {
   it('is silent in production unless a level is set', () => {
-    const previous = process.env.NODE_ENV
-    process.env.NODE_ENV = 'production'
+    // vi.stubEnv rather than a direct assignment: Next types NODE_ENV as
+    // read-only, so `process.env.NODE_ENV = 'production'` is a type error.
+    vi.stubEnv('NODE_ENV', 'production')
     setLogLevel(null)
-    try {
-      expect(getLogLevel()).toBe('silent')
-      logger.error('should not appear')
-      expect(errorSpy).not.toHaveBeenCalled()
-    } finally {
-      process.env.NODE_ENV = previous
-    }
+    expect(getLogLevel()).toBe('silent')
+    logger.error('should not appear')
+    expect(errorSpy).not.toHaveBeenCalled()
+    vi.unstubAllEnvs()
   })
 
   it('defaults to debug outside production', () => {
